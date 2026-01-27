@@ -1,5 +1,9 @@
 name: Update RSS feed
 
+
+permissions:
+  contents: write   # <-- ger workflow rätt att pusha commits
+
 on:
   schedule:
     - cron: "0 6 * * *"   # varje dag kl 06:00 UTC (~07:00 svensk tid vinter)
