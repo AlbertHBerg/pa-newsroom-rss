@@ -10,7 +10,20 @@ NEWSROOM_URL = "https://www.paconsulting.com/newsroom?filterContentType=InTheMed
 MAX_ITEMS = 10
 TIMEOUT = 30
 
-HEADOUT)HEADERS = {
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; PA-Newsroom-RSS/1.0)"
+}
+
+# ----------------------------------------
+# HELPERS
+# ----------------------------------------
+
+def fetch(url, retries=3):
+    """Fetch HTML with retry/backoff."""
+    last_exc = None
+    for i in range(retries):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
             r.raise_for_status()
             return r.text
         except Exception as e:
@@ -18,9 +31,11 @@ HEADOUT)HEADERS = {
             time.sleep(1.5 * (i + 1))
     raise last_exc
 
+
 def get_meta(soup, prop):
     tag = soup.find("meta", property=prop)
     return tag["content"].strip() if tag and tag.get("content") else ""
+
 
 def cdata(text):
     if text is None:
@@ -30,8 +45,9 @@ def cdata(text):
     text = text.replace("]]>", "]]&gt;")
     return f"<![CDATA[{text}]]>"
 
+
 # ----------------------------------------
-# NEW: extract article links + publication dates
+# Extract links + REAL publication dates
 # ----------------------------------------
 
 def extract_article_links(list_html):
@@ -42,43 +58,41 @@ def extract_article_links(list_html):
         label_el = card.select_one(".search-result__label")
         if not label_el:
             continue
-        if "In The Media" not in label_el.get_text(strip=True):
+
+        label = label_el.get_text(strip=True)
+        if "In The Media" not in label:
             continue
 
         href = card.get("href")
         if not href.startswith("https://www.paconsulting.com/newsroom/"):
             continue
 
-        # extract PA's date text
         date_el = card.select_one(".search-result__date")
         date_text = date_el.get_text(strip=True) if date_el else None
 
         items.append((href, date_text))
 
     uniq = []
-    for href, d in items:
-        if href not in [x[0] for x in uniq]:
-            uniq.append((href, d))
+    for u, d in items:
+        if u not in [x[0] for x in uniq]:
+            uniq.append((u, d))
 
     return uniq[:MAX_ITEMS]
 
-# ----------------------------------------
-# MAIN RSS BUILDER
-# ----------------------------------------
 
 def parse_pa_date(date_text):
-    """
-    Convert '14 January 2026' → RFC822 pubDate.
-    Fallback to now() if parsing fails.
-    """
     if not date_text:
         return format_datetime(datetime.utcnow())
-
     try:
         dt = datetime.strptime(date_text, "%d %B %Y")
         return format_datetime(dt)
     except Exception:
         return format_datetime(datetime.utcnow())
+
+
+# ----------------------------------------
+# Build items
+# ----------------------------------------
 
 def build_items_html(article_tuples):
     items = ""
@@ -95,7 +109,6 @@ def build_items_html(article_tuples):
         description = get_meta(soup, "og:description") or ""
         image = get_meta(soup, "og:image") or ""
 
-        # NEW: real publication date
         pub_date = parse_pa_date(raw_date)
 
         enclosure = ""
@@ -114,6 +127,7 @@ def build_items_html(article_tuples):
 
     return items
 
+
 # ----------------------------------------
 # MAIN
 # ----------------------------------------
@@ -122,7 +136,6 @@ def main():
     list_html = fetch(NEWSROOM_URL)
     article_tuples = extract_article_links(list_html)
 
-    # fallback if PA changes their filter
     if len(article_tuples) < MAX_ITEMS:
         try:
             alt_html = fetch("https://www.paconsulting.com/newsroom")
@@ -149,17 +162,6 @@ def main():
     with open("feed.xml", "w", encoding="utf-8") as f:
         f.write(rss)
 
+
 if __name__ == "__main__":
     main()
-``
-    "User-Agent": "Mozilla/5.0 (compatible; PA-Newsroom-RSS/1.0)"
-}
-
-# ----------------------------------------
-# HELPERS
-# ----------------------------------------
-
-def fetch(url, retries=3):
-    last_exc = None
-    for i in range(retries):
-        try:
