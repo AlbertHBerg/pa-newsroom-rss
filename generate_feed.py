@@ -1,3 +1,4 @@
+import time
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -8,55 +9,76 @@ NEWSROOM_URL = "https://www.paconsulting.com/newsroom?filterContentType=InTheMed
 MAX_ITEMS = 10
 TIMEOUT = 30
 
-headers = {
+HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; PA-Newsroom-RSS/1.0)"
 }
+
+def fetch(url, retries=3):
+    """Fetch HTML with retry + backoff."""
+    last = None
+    for i in range(retries):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            r.raise_for_status()
+            return r.text
+        except Exception as e:
+            last = e
+            time.sleep(1.5 * (i+1))
+    raise last
 
 def get_meta(soup, prop):
     tag = soup.find("meta", property=prop)
     return tag["content"].strip() if tag and tag.get("content") else ""
 
-def fetch(url):
-    return requests.get(url, headers=headers, timeout=TIMEOUT).text
-
-def main():
-    html = fetch(NEWSROOM_URL)
+def extract_article_links(html):
+    """
+    PA Newsroom uses full URLs for articles:
+      https://www.paconsulting.com/newsroom/...
+    We select ONLY <a.search-result> inside the listing block.
+    """
     soup = BeautifulSoup(html, "html.parser")
 
-    # Hämta länkar till artiklar (begränsa till MAX_ITEMS)
     links = []
-    for a in soup.select("a[href^='/newsroom/']"):
+    for a in soup.select("a.search-result"):
         href = a.get("href")
         if not href:
             continue
-        if href.startswith("/newsroom/") and href not in links:
+        if href.startswith("https://www.paconsulting.com/newsroom/"):
             links.append(href)
-        if len(links) >= MAX_ITEMS:
-            break
 
-    items_xml = ""
+    # Remove duplicates and cap at MAX_ITEMS
+    uniq = []
+    for x in links:
+        if x not in uniq:
+            uniq.append(x)
+    return uniq[:MAX_ITEMS]
 
-    for href in links:
-        url = BASE_URL + href
-        article_html = fetch(url)
-        article_soup = BeautifulSoup(article_html, "html.parser")
+def build_items_html(urls):
+    items = ""
+    for url in urls:
+        try:
+            article_html = fetch(url)
+        except Exception:
+            continue
 
-        title = get_meta(article_soup, "og:title") or article_soup.title.get_text(strip=True)
-        description = get_meta(article_soup, "og:description")
-        image = get_meta(article_soup, "og:image")
+        soup = BeautifulSoup(article_html, "html.parser")
 
-        # Fallbacks om något saknas
+        title = get_meta(soup, "og:title")
+        description = get_meta(soup, "og:description")
+        image = get_meta(soup, "og:image")
+
+        # Fallbacks
+        if not title and soup.title:
+            title = soup.title.get_text(strip=True)
         if not description:
-            # Försök hitta ingress i body om og:description saknas
-            p = article_soup.find("p")
+            p = soup.find("p")
             description = p.get_text(strip=True) if p else ""
 
         pub_date = format_datetime(datetime.utcnow())
 
-        # enclosure används ofta för bilder i RSS
         enclosure = f'<enclosure url="{image}" type="image/jpeg" />' if image else ""
 
-        items_xml += f"""
+        items += f"""
     <item>
       <title><![CDATA[{title}]]></title>
       <link>{url}</link>
@@ -66,12 +88,25 @@ def main():
       {enclosure}
     </item>"""
 
+    return items
+
+def main():
+    list_html = fetch(NEWSROOM_URL)
+    urls = extract_article_links(list_html)
+
+    # fallback: om listan är tom, testa utan filter
+    if len(urls) == 0:
+        alt_html = fetch("https://www.paconsulting.com/newsroom")
+        urls = extract_article_links(alt_html)
+
+    items_xml = build_items_html(urls)
+
     rss = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 <channel>
   <title>PA Consulting – In the Media</title>
   <link>{NEWSROOM_URL}</link>
-  <description>Automatically generated feed from PA Consulting newsroom (In the Media)</description>
+  <description>Automatically generated feed (In the Media)</description>
   {items_xml}
 </channel>
 </rss>
