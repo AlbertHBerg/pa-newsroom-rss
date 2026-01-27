@@ -5,28 +5,12 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from email.utils import format_datetime
 
-# ----------------------------------------
-# KONFIGURATION
-# ----------------------------------------
 BASE_URL = "https://www.paconsulting.com"
 NEWSROOM_URL = "https://www.paconsulting.com/newsroom?filterContentType=InTheMedia"
 MAX_ITEMS = 10
 TIMEOUT = 30
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; PA-Newsroom-RSS/1.0)"
-}
-
-# ----------------------------------------
-# HJÄLPFUNKTIONER
-# ----------------------------------------
-
-def fetch(url, retries=3):
-    """Fetch HTML with retry/backoff."""
-    last_exc = None
-    for i in range(retries):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+HEADOUT)HEADERS = {
             r.raise_for_status()
             return r.text
         except Exception as e:
@@ -34,63 +18,72 @@ def fetch(url, retries=3):
             time.sleep(1.5 * (i + 1))
     raise last_exc
 
-
 def get_meta(soup, prop):
-    """Extract OpenGraph meta tag content."""
     tag = soup.find("meta", property=prop)
     return tag["content"].strip() if tag and tag.get("content") else ""
 
-
 def cdata(text):
-    """Wrap text safely in CDATA and escape harmful sequences."""
     if text is None:
         return "<![CDATA[]]>"
-    # Fix double-encoded ampersands first
     text = text.replace("&amp;", "&")
-    # Escape standalone &
     text = text.replace("&", "&amp;")
-    # Prevent CDATA termination inside content
     text = text.replace("]]>", "]]&gt;")
     return f"<![CDATA[{text}]]>"
 
+# ----------------------------------------
+# NEW: extract article links + publication dates
+# ----------------------------------------
 
 def extract_article_links(list_html):
-    """
-    Extract only 'In The Media' article URLs from PA's newsroom list.
-    Looks specifically for <a class="search-result"> blocks
-    with an inner label containing 'In The Media'.
-    """
     soup = BeautifulSoup(list_html, "html.parser")
-    urls = []
+    items = []
 
     for card in soup.select("a.search-result"):
         label_el = card.select_one(".search-result__label")
         if not label_el:
             continue
-
-        label = label_el.get_text(strip=True)
-        if "In The Media" not in label:
-            continue  # skip Press releases or anything else
+        if "In The Media" not in label_el.get_text(strip=True):
+            continue
 
         href = card.get("href")
-        if href and href.startswith("https://www.paconsulting.com/newsroom/"):
-            urls.append(href)
+        if not href.startswith("https://www.paconsulting.com/newsroom/"):
+            continue
 
-    # dedupe + cap items
+        # extract PA's date text
+        date_el = card.select_one(".search-result__date")
+        date_text = date_el.get_text(strip=True) if date_el else None
+
+        items.append((href, date_text))
+
     uniq = []
-    for u in urls:
-        if u not in uniq:
-            uniq.append(u)
+    for href, d in items:
+        if href not in [x[0] for x in uniq]:
+            uniq.append((href, d))
+
     return uniq[:MAX_ITEMS]
 
-
 # ----------------------------------------
-# RSS-GENERERING
+# MAIN RSS BUILDER
 # ----------------------------------------
 
-def build_items_html(urls):
+def parse_pa_date(date_text):
+    """
+    Convert '14 January 2026' → RFC822 pubDate.
+    Fallback to now() if parsing fails.
+    """
+    if not date_text:
+        return format_datetime(datetime.utcnow())
+
+    try:
+        dt = datetime.strptime(date_text, "%d %B %Y")
+        return format_datetime(dt)
+    except Exception:
+        return format_datetime(datetime.utcnow())
+
+def build_items_html(article_tuples):
     items = ""
-    for url in urls:
+    for url, raw_date in article_tuples:
+
         try:
             html_content = fetch(url)
         except Exception:
@@ -98,26 +91,16 @@ def build_items_html(urls):
 
         soup = BeautifulSoup(html_content, "html.parser")
 
-        title = get_meta(soup, "og:title")
-        description = get_meta(soup, "og:description")
-        image = get_meta(soup, "og:image")
+        title = get_meta(soup, "og:title") or (soup.title.get_text(strip=True) if soup.title else "")
+        description = get_meta(soup, "og:description") or ""
+        image = get_meta(soup, "og:image") or ""
 
-        # fallback för titel
-        if not title and soup.title:
-            title = soup.title.get_text(strip=True)
-
-        # fallback för beskrivning
-        if not description:
-            p = soup.find("p")
-            description = p.get_text(strip=True) if p else ""
-
-        pub_date = format_datetime(datetime.utcnow())
+        # NEW: real publication date
+        pub_date = parse_pa_date(raw_date)
 
         enclosure = ""
         if image:
-            # escape image URL
-            img = html.escape(image)
-            enclosure = f'<enclosure url="{img}" type="image/jpeg" />'
+            enclosure = f'<enclosure url="{html.escape(image)}" type="image/jpeg" />'
 
         items += f"""
     <item>
@@ -131,27 +114,26 @@ def build_items_html(urls):
 
     return items
 
-
 # ----------------------------------------
 # MAIN
 # ----------------------------------------
 
 def main():
     list_html = fetch(NEWSROOM_URL)
-    urls = extract_article_links(list_html)
+    article_tuples = extract_article_links(list_html)
 
-    # fallback om filtret laddade för lite eller zero
-    if len(urls) < MAX_ITEMS:
+    # fallback if PA changes their filter
+    if len(article_tuples) < MAX_ITEMS:
         try:
             alt_html = fetch("https://www.paconsulting.com/newsroom")
-            alt_urls = extract_article_links(alt_html)
-            for u in alt_urls:
-                if u not in urls and len(urls) < MAX_ITEMS:
-                    urls.append(u)
-        except Exception:
+            extra = extract_article_links(alt_html)
+            for tup in extra:
+                if tup[0] not in [x[0] for x in article_tuples] and len(article_tuples) < MAX_ITEMS:
+                    article_tuples.append(tup)
+        except:
             pass
 
-    items_xml = build_items_html(urls)
+    items_xml = build_items_html(article_tuples)
 
     rss = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -167,6 +149,17 @@ def main():
     with open("feed.xml", "w", encoding="utf-8") as f:
         f.write(rss)
 
-
 if __name__ == "__main__":
     main()
+``
+    "User-Agent": "Mozilla/5.0 (compatible; PA-Newsroom-RSS/1.0)"
+}
+
+# ----------------------------------------
+# HELPERS
+# ----------------------------------------
+
+def fetch(url, retries=3):
+    last_exc = None
+    for i in range(retries):
+        try:
