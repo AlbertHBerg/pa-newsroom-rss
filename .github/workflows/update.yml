@@ -1,0 +1,30 @@
+name: Update RSS feed
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # varje dag kl 06:00 UTC (~07:00 svensk tid vinter)
+  workflow_dispatch:       # så du kan köra manuellt från fliken 'Actions'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Generate feed
+        run: python generate_feed.py
+
+      - name: Commit & push updated feed
+        run: |
+          git config user.name "RSS Bot"
+          git config user.email "rss-bot@example.com"
+          git add feed.xml
+          git commit -m "Update RSS feed" || echo "No changes to commit"
+          git push
