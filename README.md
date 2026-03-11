@@ -3,7 +3,7 @@ Repo for creating, hosting, and updating an PA Newsroom RSS-feed.
 
 Mål: Denna sida publicerar RSS‑filen här:
 
-"https://<konto>.github.io/<repo>/feed.xml" (exempel: https://alberthberg.github.io/pa-newsroom-rss/feed.xml)
+https://konto.github.io/repo/feed.xml (exempel: https://alberthberg.github.io/pa-newsroom-rss/feed.xml)
 
 Gör så här om allt måste återskapas:
 
