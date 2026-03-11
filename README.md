@@ -11,13 +11,13 @@ Skapa nytt tomt GitHub-repo.
 
 Ladda upp alla fyra filer/mappar:
 
-generate_feed.py
+1. generate_feed.py
 
-feed.xml
+2. feed.xml
 
-README.md
+3. README.md
 
-hela mappen .github/workflows/ (med filen update.yml)
+4. hela mappen .github/workflows/ (med filen update.yml)
 
 
 Gå till Settings → Pages
