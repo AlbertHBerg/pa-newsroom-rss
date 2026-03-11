@@ -29,6 +29,5 @@ Branch: main och Folder: / (root) → Save
 
 Gå till Actions → öppna workflow “Update RSS feed” → Run workflow.
 
-Vänta ~1–2 minuter och öppna länken:
-
-https://<konto>.github.io/<repo>/feed.xml
+Vänta ~1–2 minuter och öppna länken med strukturen https://konto.github.io/repo/feed.xml. 
+Din faktiska länk beror alltså på vad ditt kontonamn är och vad du döpt repot till.
